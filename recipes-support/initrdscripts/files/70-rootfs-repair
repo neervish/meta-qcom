@@ -1,0 +1,50 @@
+#!/bin/sh
+# Purpose:
+#   Perform minimal, safe root filesystem repair (fsck only).
+#
+# Scope:
+#   - Operates ONLY on the normal system rootfs
+#   - Does NOT mount rootfs
+#   - Skip rootfs repair if EFI is known to be broken
+#
+# Dependency:
+#   - Consumes EFI_STATUS from /run/recovery.efi
+
+set -eu
+
+RECOVERY_MODE="$(cat /run/recovery.mode 2>/dev/null || echo 0)"
+[ "$RECOVERY_MODE" = "1" ] || exit 0
+
+EFI_STATUS="unknown"
+[ -f /run/recovery.efi ] && . /run/recovery.efi
+
+if [ "$EFI_STATUS" = "broken" ]; then
+    echo "[recovery] rootfs repair: skipped (EFI broken)"
+    exit 0
+fi
+
+echo "[recovery] rootfs repair: start"
+
+ROOT_DEV=""
+
+# Heuristic: first ext4 filesystem
+for cand in $(blkid -t TYPE=ext4 -o device 2>/dev/null); do
+    ROOT_DEV="$cand"
+    break
+done
+
+if [ -z "$ROOT_DEV" ]; then
+    echo "[recovery] rootfs repair: no ext4 candidate found"
+    exit 0
+fi
+
+# Non-interactive fsck
+if /sbin/e2fsck -p "$ROOT_DEV"; then
+    echo "[recovery] rootfs repair: OK"
+else
+    echo "[recovery] rootfs repair: issues detected; forcing repair"
+    /sbin/e2fsck -y "$ROOT_DEV" || true
+fi
+
+echo "[recovery] rootfs repair: done"
+exit 0

@@ -10,6 +10,13 @@ QCOM_BOOT_FIRMWARE ?= ""
 QCOM_ESP_IMAGE ?= "${@bb.utils.contains("MACHINE_FEATURES", "efi", "esp-qcom-image", "", d)}"
 QCOM_ESP_FILE ?= "${@'${DEPLOY_DIR_IMAGE}/${QCOM_ESP_IMAGE}-${MACHINE}${IMAGE_NAME_SUFFIX}.vfat' if d.getVar('QCOM_ESP_IMAGE') else ''}"
 
+QCOM_RECOVERY_ESP_IMAGE ?= ""
+QCOM_RECOVERY_ESP_FILE ?= "${@ '${DEPLOY_DIR_IMAGE}/${QCOM_RECOVERY_ESP_IMAGE}-${MACHINE}${IMAGE_NAME_SUFFIX}.vfat' \
+    if d.getVar('QCOM_RECOVERY_ESP_IMAGE') else '' }"
+
+# When not specified, assume the board supports FIT-based
+# multi-DTB and mention this as the default DTB to be flashed.
+QCOM_DTB_DEFAULT ?= "multi-dtb"
 QCOM_DTB_FILE ?= "dtb.bin"
 
 QCOM_BOOT_FILES_SUBDIR ?= ""
@@ -29,6 +36,7 @@ do_image_qcomflash[depends] += "${@ ['', '${QCOM_PARTITION_CONF}:do_deploy'][d.g
                                 pigz-native:do_populate_sysroot virtual/kernel:do_deploy \
 				${@'virtual/bootloader:do_deploy' if d.getVar('PREFERRED_PROVIDER_virtual/bootloader') else  ''} \
 				${@'${QCOM_ESP_IMAGE}:do_image_complete' if d.getVar('QCOM_ESP_IMAGE') != '' else  ''} \
+        ${@'${QCOM_RECOVERY_ESP_IMAGE}:do_image_complete' if d.getVar('QCOM_RECOVERY_ESP_IMAGE') else ''} \
 				${@'abl2esp:do_deploy' if d.getVar('ABL_SIGNATURE_VERSION') else  ''}"
 IMAGE_TYPEDEP:qcomflash += "${IMAGE_QCOMFLASH_FS_TYPE}"
 
@@ -47,6 +55,7 @@ deploy_partition_files() {
 create_qcomflash_pkg() {
     # esp image
     [ -n "${QCOM_ESP_FILE}" ] && install -m 0644 ${QCOM_ESP_FILE} efi.bin
+    [ -n "${QCOM_RECOVERY_ESP_FILE}" ] && install -m 0644 ${QCOM_RECOVERY_ESP_FILE} efi_recovery.bin
 
     # dtb image
     if [ -n "${QCOM_DTB_DEFAULT}" ] && \

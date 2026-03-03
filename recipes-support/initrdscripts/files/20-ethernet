@@ -1,0 +1,120 @@
+#!/bin/sh
+
+ethernet_enabled() {
+    # Run only if Ethernet is defined by the machine
+    # [ -n "${INITRAMFS_ETH_MODULES}" ]
+    return 0
+}
+
+ethernet_run() {
+    msg "[eth] Initramfs Ethernet bring-up started"
+
+    #
+    # 1. Firmware handling (only if configured)
+    #
+    if [ -n "${INITRAMFS_ETH_FW_PARTLABEL}" ]; then
+        FW_DEV="/dev/disk/by-partlabel/${INITRAMFS_ETH_FW_PARTLABEL}"
+
+        if [ ! -e "$FW_DEV" ]; then
+            msg "[eth] Firmware partition not found: ${INITRAMFS_ETH_FW_PARTLABEL}"
+        else
+            msg "[eth] Firmware partition found, attempting mount"
+
+            mkdir -p /mnt/eth_fw
+
+            if mount -t ext4 "$FW_DEV" /mnt/eth_fw 2>/dev/null; then
+                msg "[eth] Firmware partition mounted successfully"
+
+                # Create firmware dir ONLY after successful mount
+                mkdir -p /lib/firmware
+
+                for fw in ${INITRAMFS_ETH_FW_FILES}; do
+                    if [ -f "/mnt/eth_fw/$fw" ]; then
+                        cp "/mnt/eth_fw/$fw" /lib/firmware/
+                        msg "[eth] Copied firmware: $fw"
+                    else
+                        msg "[eth] Firmware file missing: $fw"
+                    fi
+                done
+
+                umount /mnt/eth_fw 2>/dev/null || \
+                    msg "[eth] Warning: failed to unmount firmware partition"
+            else
+                msg "[eth] Failed to mount firmware partition"
+            fi
+        fi
+    fi
+
+    #
+    # 2. Load kernel modules
+    #
+    for pkg in ${INITRAMFS_ETH_MODULES}; do
+        mod="${pkg#kernel-module-}"
+        load_kernel_module "$mod"
+    done
+
+
+    #
+    # 3. Optional xHCI bind with timeout (machine-specific)
+    #
+#    if [ -n "${INITRAMFS_ETH_NEEDS_XHCI_BIND}" ] && \
+#       [ -n "${INITRAMFS_ETH_XHCI_DRIVER}" ]; then
+#
+#        msg "[eth] Attempting xHCI bind"
+#        bind_timeout=5
+#
+#        while [ $bind_timeout -gt 0 ]; do
+#            bound=0
+#            for dev in /sys/bus/pci/devices/*; do
+#                if [ -e "$dev/class" ] && grep -q 0x0c03 "$dev/class"; then
+#                    if echo "$(basename "$dev")" > \
+#                        "/sys/bus/pci/drivers/${INITRAMFS_ETH_XHCI_DRIVER}/bind" \
+#                        2>/dev/null; then
+#                        msg "[eth] Bound xHCI device $(basename "$dev")"
+#                        bound=1
+#                    fi
+#                fi
+#            done
+#
+#            [ $bound -eq 1 ] && break
+#            sleep 1
+#            bind_timeout=$((bind_timeout - 1))
+#        done
+#
+#        [ $bind_timeout -eq 0 ] && \
+#           msg "[eth] xHCI bind timeout reached"
+#    fi
+
+    #
+    # 4. Discover Ethernet interfaces with timeout
+    #
+    timeout=5
+    while [ $timeout -gt 0 ]; do
+        found=""
+        for iface in /sys/class/net/*; do
+            name="$(basename "$iface")"
+            [ "$name" = "lo" ] && continue
+            [ -e "$iface/device" ] && found="$found $name"
+        done
+        [ -n "$found" ] && break
+        sleep 1
+        timeout=$((timeout - 1))
+    done
+
+    #
+    # 5. Bring up all detected interfaces and request DHCP
+    #
+    if [ -n "$found" ]; then
+        for name in $found; do
+            msg "[eth] Bringing up $name"
+            ip link set "$name" up 2>/dev/null || continue
+            udhcpc -i "$name" -t 5 && \
+                msg "[eth] DHCP success on $name"
+        done
+    else
+        msg "[eth] No Ethernet interfaces detected"
+    fi
+
+    msg "[eth] Ethernet initramfs step complete"
+}
+
