@@ -1,48 +1,50 @@
 #!/bin/sh
-# Purpose: detect recovery mode & load policy
-# Order: runs early (before any repair attempts)
-set -eu
+# Purpose: detect recovery mode and publish effective policy.
+# initramfs-framework module name: "policy"
 
-POLICY=/etc/recovery/policy.conf
-STATE_DIR=/run
-RECOVERY_FLAG="${STATE_DIR}/recovery.mode"
-POLICY_SNAPSHOT="${STATE_DIR}/recovery.policy"
+policy_enabled() {
+    return 0
+}
 
-mkdir -p "${STATE_DIR}"
+policy_run() {
+    POLICY=/etc/recovery/policy.conf
+    STATE_DIR=/run
+    RECOVERY_FLAG="${STATE_DIR}/recovery.mode"
+    POLICY_SNAPSHOT="${STATE_DIR}/recovery.policy"
 
-MODE_DEFAULT="recovery"
-ALLOW_SHELL_DEFAULT="1"
+    MODE_DEFAULT="recovery"
+    ALLOW_SHELL_DEFAULT="1"
+    MODE="${MODE_DEFAULT}"
+    ALLOW_SHELL="${ALLOW_SHELL_DEFAULT}"
+    RECOVERY_MODE=0
 
-# Load policy if present
-[ -f "${POLICY}" ] && . "${POLICY}" 2>/dev/null || true
-MODE="${MODE:-${MODE_DEFAULT}}"
-ALLOW_SHELL="${ALLOW_SHELL:-${ALLOW_SHELL_DEFAULT}}"
+    mkdir -p "${STATE_DIR}"
 
-# Detect UEFI-driven recovery mode (best-effort)
-RECOVERY_MODE=0
+    # Optional policy file for integrator customization.
+    [ -f "${POLICY}" ] && . "${POLICY}" 2>/dev/null || true
+    MODE="${MODE:-${MODE_DEFAULT}}"
+    ALLOW_SHELL="${ALLOW_SHELL:-${ALLOW_SHELL_DEFAULT}}"
 
-if grep -qw 'recovery_mode=1' /proc/cmdline; then
-    RECOVERY_MODE=1
-fi
+    if grep -qw 'recovery_mode=1' /proc/cmdline 2>/dev/null; then
+        RECOVERY_MODE=1
+    fi
 
-if [ "${RECOVERY_MODE}" = "0" ] &&
-   ls /sys/firmware/efi/efivars/LoaderImageIdentifier-* >/dev/null 2>&1; then
-    RECOVERY_MODE=1
-fi
+    if [ "${RECOVERY_MODE}" = "0" ] &&
+       ls /sys/firmware/efi/efivars/LoaderImageIdentifier-* >/dev/null 2>&1; then
+        RECOVERY_MODE=1
+    fi
 
-# MODE=always forces recovery behavior regardless of EFI var
-if [ "${MODE}" = "always" ]; then
-    RECOVERY_MODE=1
-fi
+    if [ "${MODE}" = "always" ]; then
+        RECOVERY_MODE=1
+    fi
 
-echo "${RECOVERY_MODE}" > "${RECOVERY_FLAG}"
+    echo "${RECOVERY_MODE}" > "${RECOVERY_FLAG}"
 
-# Snapshot effective policy for debugging
-{
-    echo "MODE=${MODE}"
-    echo "ALLOW_SHELL=${ALLOW_SHELL}"
-    echo "RECOVERY_MODE=${RECOVERY_MODE}"
-} > "${POLICY_SNAPSHOT}"
+    {
+        echo "MODE=${MODE}"
+        echo "ALLOW_SHELL=${ALLOW_SHELL}"
+        echo "RECOVERY_MODE=${RECOVERY_MODE}"
+    } > "${POLICY_SNAPSHOT}"
 
-exit 0
-
+    return 0
+}

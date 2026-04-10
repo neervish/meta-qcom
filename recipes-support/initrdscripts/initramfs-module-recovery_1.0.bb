@@ -9,6 +9,7 @@ inherit allarch
 
 # --- Local sources today (kept in files/) ---
 SRC_URI = " \
+  file://README.recovery.md \
   file://40-policy \
   file://60-efi-repair \
   file://70-rootfs-repair \
@@ -52,6 +53,30 @@ MODE=recovery
 ALLOW_SHELL=1
 EOF
 
+    cat > ${D}/etc/recovery/efi.conf <<'EOF'
+# Runtime EFI health-check configuration
+# Normal OS ESP partition label to verify from recovery flow.
+# Override if your platform uses another partlabel.
+ESP_PARTLABEL=efi
+# Expected filesystem type for ESP.
+ESP_FSTYPE=vfat
+BOOT_FALLBACK_PATH=EFI/BOOT/bootaa64.efi
+NORMAL_UKI_GLOB=EFI/Linux/linux-*.efi
+EOF
+
+    cat > ${D}/etc/recovery/rootfs.conf <<'EOF'
+# Runtime rootfs repair configuration
+# Preferred explicit target device (overrides ROOTFS_PARTLABEL when set):
+# ROOTFS_DEVICE=/dev/sda3
+ROOTFS_DEVICE=
+# Normal OS rootfs partition label to verify/repair.
+ROOTFS_PARTLABEL=rootfs
+# Expected filesystem type.
+ROOTFS_FSTYPE=ext4
+# If set to 1, skip rootfs repair when EFI check is broken.
+SKIP_IF_EFI_BROKEN=1
+EOF
+
     install -m 0755 ${S}/40-policy         ${D}/init.d/40-policy
     install -m 0755 ${S}/60-efi-repair     ${D}/init.d/60-efi-repair
     install -m 0755 ${S}/70-rootfs-repair  ${D}/init.d/70-rootfs-repair
@@ -65,7 +90,8 @@ FILES:${PN} = " \
   /init.d/70-rootfs-repair \
   /init.d/98-recovery-shell \
   /etc/recovery/policy.conf \
+  /etc/recovery/efi.conf \
+  /etc/recovery/rootfs.conf \
   /run \
   ${libdir}/recovery \
 "
-

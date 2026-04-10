@@ -15,7 +15,8 @@ UKI_FILENAME = "recovery-${MACHINE}.efi"
 INITRAMFS_IMAGE = "${RECOVERY_INITRAMFS_IMAGE}"
 
 # Recovery kernel cmdline
-UKI_CMDLINE = "rdinit=/sbin/init recovery_mode=1 console=${KERNEL_CONSOLE}"
+# Use /init from initramfs-framework modules as PID1 for recovery boot.
+UKI_CMDLINE = "rdinit=/init recovery_mode=1 console=${KERNEL_CONSOLE}"
 UKI_CMDLINE += "${@d.getVar('KERNEL_CMDLINE_EXTRA') or ''}"
 
 # DTB handling same as normal ESP
@@ -24,6 +25,7 @@ KERNEL_DEVICETREE = ""
 IMAGE_FSTYPES = "vfat"
 IMAGE_FEATURES = ""
 IMAGE_LINGUAS = ""
+EXTRA_IMAGECMD:vfat += " -S ${QCOM_VFAT_SECTOR_SIZE}"
 
 # Align image size with the expected partition size (512MB)
 IMAGE_ROOTFS_SIZE = "524288"

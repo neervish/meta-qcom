@@ -9,42 +9,67 @@
 #
 # Dependency:
 #   - Consumes EFI_STATUS from /run/recovery.efi
+# initramfs-framework module name: "rootfs"
 
-set -eu
+rootfs_enabled() {
+    RECOVERY_MODE="$(cat /run/recovery.mode 2>/dev/null || echo 0)"
+    [ "${RECOVERY_MODE}" = "1" ]
+}
 
-RECOVERY_MODE="$(cat /run/recovery.mode 2>/dev/null || echo 0)"
-[ "$RECOVERY_MODE" = "1" ] || exit 0
+rootfs_run() {
+    CONF="/etc/recovery/rootfs.conf"
+    EFI_STATUS="unknown"
+    ROOT_DEV=""
+    ROOTFS_DEVICE=""
+    ROOTFS_PARTLABEL="rootfs"
+    ROOTFS_FSTYPE="ext4"
+    SKIP_IF_EFI_BROKEN="1"
 
-EFI_STATUS="unknown"
-[ -f /run/recovery.efi ] && . /run/recovery.efi
+    [ -f /run/recovery.efi ] && . /run/recovery.efi
+    [ -r "${CONF}" ] && . "${CONF}" 2>/dev/null || true
 
-if [ "$EFI_STATUS" = "broken" ]; then
-    echo "[recovery] rootfs repair: skipped (EFI broken)"
-    exit 0
-fi
+    if [ "${EFI_STATUS}" = "broken" ] && [ "${SKIP_IF_EFI_BROKEN}" = "1" ]; then
+        echo "[recovery] rootfs repair: skipped (EFI broken)"
+        return 0
+    fi
 
-echo "[recovery] rootfs repair: start"
+    echo "[recovery] rootfs repair: start"
 
-ROOT_DEV=""
+    if [ -n "${ROOTFS_DEVICE}" ]; then
+        ROOT_DEV="${ROOTFS_DEVICE}"
+    elif [ -n "${ROOTFS_PARTLABEL}" ]; then
+        ROOT_DEV="/dev/disk/by-partlabel/${ROOTFS_PARTLABEL}"
+    fi
 
-# Heuristic: first ext4 filesystem
-for cand in $(blkid -t TYPE=ext4 -o device 2>/dev/null); do
-    ROOT_DEV="$cand"
-    break
-done
+    if [ -z "${ROOT_DEV}" ]; then
+        echo "[recovery] rootfs repair: no rootfs target configured"
+        return 0
+    fi
 
-if [ -z "$ROOT_DEV" ]; then
-    echo "[recovery] rootfs repair: no ext4 candidate found"
-    exit 0
-fi
+    if [ ! -e "${ROOT_DEV}" ]; then
+        echo "[recovery] rootfs repair: target not found (${ROOT_DEV})"
+        return 0
+    fi
 
-# Non-interactive fsck
-if /sbin/e2fsck -p "$ROOT_DEV"; then
-    echo "[recovery] rootfs repair: OK"
-else
-    echo "[recovery] rootfs repair: issues detected; forcing repair"
-    /sbin/e2fsck -y "$ROOT_DEV" || true
-fi
+    fs_type="$(blkid -s TYPE -o value "${ROOT_DEV}" 2>/dev/null || true)"
+    if [ -n "${ROOTFS_FSTYPE}" ] && [ "${fs_type}" != "${ROOTFS_FSTYPE}" ]; then
+        echo "[recovery] rootfs repair: unexpected fs type (${fs_type:-unknown}), expected ${ROOTFS_FSTYPE}"
+        return 0
+    fi
 
-echo "[recovery] rootfs repair: done"
-exit 0
+    # Non-interactive fsck
+    if [ "${ROOTFS_FSTYPE}" = "ext4" ] || [ "${ROOTFS_FSTYPE}" = "ext3" ] || [ "${ROOTFS_FSTYPE}" = "ext2" ]; then
+        if /sbin/e2fsck -p "${ROOT_DEV}"; then
+            echo "[recovery] rootfs repair: OK"
+        else
+            echo "[recovery] rootfs repair: issues detected; forcing repair"
+            /sbin/e2fsck -y "${ROOT_DEV}" || true
+        fi
+    else
+        echo "[recovery] rootfs repair: unsupported ROOTFS_FSTYPE (${ROOTFS_FSTYPE})"
+        return 0
+    fi
+
+    echo "[recovery] rootfs repair: done"
+    return 0
+}

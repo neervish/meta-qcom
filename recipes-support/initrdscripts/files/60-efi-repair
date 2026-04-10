@@ -5,53 +5,72 @@
 #
 # Output:
 #   Writes EFI_STATUS to /run/recovery.efi
+# initramfs-framework module name: "efi"
 
-set -eu
+efi_enabled() {
+    RECOVERY_MODE="$(cat /run/recovery.mode 2>/dev/null || echo 0)"
+    [ "${RECOVERY_MODE}" = "1" ]
+}
 
-RECOVERY_MODE="$(cat /run/recovery.mode 2>/dev/null || echo 0)"
-[ "$RECOVERY_MODE" = "1" ] || exit 0
+efi_run() {
+    CONF="/etc/recovery/efi.conf"
+    EFI_STATUS="unknown"
+    ESP_DEV=""
+    ESP_PARTLABEL="efi"
+    ESP_FSTYPE="vfat"
+    BOOT_FALLBACK_PATH="EFI/BOOT/bootaa64.efi"
+    NORMAL_UKI_GLOB="EFI/Linux/linux-*.efi"
 
-echo "[recovery] EFI check: start"
+    echo "[recovery] EFI check: start"
 
-EFI_STATUS="unknown"
-ESP_DEV=""
+    [ -r "${CONF}" ] && . "${CONF}" 2>/dev/null || true
 
-# Locate normal ESP (vfat)
-for cand in $(blkid -t TYPE=vfat -o device 2>/dev/null); do
-    ESP_DEV="$cand"
-    break
-done
-
-if [ -z "$ESP_DEV" ]; then
-    echo "[recovery] EFI check: no ESP found"
-    EFI_STATUS="broken"
-else
-    mkdir -p /mnt/esp
-
-    if mount -t vfat -o ro "$ESP_DEV" /mnt/esp; then
-        EFI_STATUS="healthy"
-
-        # Layer 1: firmware entry point
-        if [ ! -f /mnt/esp/EFI/BOOT/bootaa64.efi ]; then
-            echo "[recovery] EFI check: missing EFI/BOOT/bootaa64.efi"
-            EFI_STATUS="broken"
-        fi
-
-        # Layer 2: normal UKI
-        if [ ! -f /mnt/esp/EFI/Linux/linux-${MACHINE}.efi ]; then
-            echo "[recovery] EFI check: missing normal UKI"
-            EFI_STATUS="broken"
-        fi
-
-        umount /mnt/esp || true
+    if [ -z "${ESP_PARTLABEL}" ]; then
+        echo "[recovery] EFI check: ESP_PARTLABEL is empty"
+        EFI_STATUS="broken"
     else
-        echo "[recovery] EFI check: failed to mount ESP"
+        ESP_DEV="/dev/disk/by-partlabel/${ESP_PARTLABEL}"
+    fi
+
+    if [ "${EFI_STATUS}" != "broken" ] && [ ! -e "${ESP_DEV}" ]; then
+        echo "[recovery] EFI check: partlabel not found (${ESP_PARTLABEL})"
         EFI_STATUS="broken"
     fi
-fi
 
-# Publish result for downstream scripts
-echo "EFI_STATUS=${EFI_STATUS}" > /run/recovery.efi
+    if [ "${EFI_STATUS}" != "broken" ]; then
+        fs_type="$(blkid -s TYPE -o value "${ESP_DEV}" 2>/dev/null || true)"
+        if [ -n "${ESP_FSTYPE}" ] && [ "${fs_type}" != "${ESP_FSTYPE}" ]; then
+            echo "[recovery] EFI check: unexpected fs type (${fs_type:-unknown}), expected ${ESP_FSTYPE}"
+            EFI_STATUS="broken"
+        fi
+    fi
 
-echo "[recovery] EFI check: ${EFI_STATUS}"
-exit 0
+    if [ "${EFI_STATUS}" = "broken" ]; then
+        :
+    else
+        mkdir -p /mnt/esp
+
+        if mount -t "${ESP_FSTYPE}" -o ro "${ESP_DEV}" /mnt/esp 2>/dev/null; then
+            EFI_STATUS="healthy"
+
+            if [ ! -f "/mnt/esp/${BOOT_FALLBACK_PATH}" ]; then
+                echo "[recovery] EFI check: missing ${BOOT_FALLBACK_PATH}"
+                EFI_STATUS="broken"
+            fi
+
+            if ! ls /mnt/esp/${NORMAL_UKI_GLOB} >/dev/null 2>&1; then
+                echo "[recovery] EFI check: missing UKI (${NORMAL_UKI_GLOB})"
+                EFI_STATUS="broken"
+            fi
+
+            umount /mnt/esp >/dev/null 2>&1 || true
+        else
+            echo "[recovery] EFI check: failed to mount ESP"
+            EFI_STATUS="broken"
+        fi
+    fi
+
+    echo "EFI_STATUS=${EFI_STATUS}" > /run/recovery.efi
+    echo "[recovery] EFI check: ${EFI_STATUS}"
+    return 0
+}

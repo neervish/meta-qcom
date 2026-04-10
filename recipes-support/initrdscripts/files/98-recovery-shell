@@ -1,26 +1,31 @@
 #!/bin/sh
 # Purpose: last step; if allowed by policy (or upon failure), drop to interactive shell
-set -eu
+# initramfs-framework module name: "recovery"
 
-ALLOW_SHELL_DEFAULT="1"
-ALLOW_SHELL="${ALLOW_SHELL_DEFAULT}"
-[ -f /etc/recovery/policy.conf ] && . /etc/recovery/policy.conf 2>/dev/null || true
+recovery_enabled() {
+    return 0
+}
 
-RECOVERY_MODE="$(cat /run/recovery.mode 2>/dev/null || echo 0)"
+recovery_run() {
+    ALLOW_SHELL_DEFAULT="1"
+    ALLOW_SHELL="${ALLOW_SHELL_DEFAULT}"
+    RECOVERY_MODE="$(cat /run/recovery.mode 2>/dev/null || echo 0)"
 
-if [ "${ALLOW_SHELL:-1}" = "1" ] || [ "${RECOVERY_MODE}" = "1" ]; then
-    echo ""
-    echo "==================== PLATFORM RECOVERY SHELL ===================="
-    echo " Environment:"
-    [ -f /run/recovery.policy ] && cat /run/recovery.policy
-    echo " Notes:"
-    echo "  - Use 'blkid', 'parted -l' to inspect storage"
-    echo "  - Use 'fsck.<fs>' (e2fsck) for repairs"
-    echo "  - 'reboot -f' to restart"
-    echo "==============================================================="
-    echo ""
-    exec /bin/sh
-fi
+    [ -f /etc/recovery/policy.conf ] && . /etc/recovery/policy.conf 2>/dev/null || true
 
-exit 0
+    if [ "${ALLOW_SHELL:-1}" = "1" ] || [ "${RECOVERY_MODE}" = "1" ]; then
+        echo ""
+        echo "==================== PLATFORM RECOVERY SHELL ===================="
+        echo " Environment:"
+        [ -f /run/recovery.policy ] && cat /run/recovery.policy
+        echo " Notes:"
+        echo "  - Use 'blkid', 'parted -l' to inspect storage"
+        echo "  - Use 'fsck.<fs>' (e2fsck) for repairs"
+        echo "  - 'reboot -f' to restart"
+        echo "==============================================================="
+        echo ""
+        exec /bin/sh
+    fi
 
+    return 0
+}
